@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+/.vs
+/Disable .dbc51ae1
+/x64
