@@ -60,7 +60,6 @@ void LogHeader(const std::wstring& header) {
 }
 
 void LogMessage(const std::wstring& message, bool error = false) {
-
     SetConsoleColor(error ? FOREGROUND_RED : FOREGROUND_INTENSITY);
     std::wcout << message << std::endl;
     ResetConsoleColor();
@@ -97,50 +96,80 @@ void SetRegistryValue(HKEY hKey, const std::wstring& subKey, const std::wstring&
 
 void StopAndDisableService(const std::wstring& serviceName) {
     SC_HANDLE scmHandle = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
-    if (scmHandle) {
-        SC_HANDLE serviceHandle = OpenService(scmHandle, serviceName.c_str(), SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_CHANGE_CONFIG);
-        if (serviceHandle) {
-            SERVICE_STATUS_PROCESS serviceStatus;
-            DWORD bytesNeeded;
-            if (QueryServiceStatusEx(serviceHandle, SC_STATUS_PROCESS_INFO, (LPBYTE)&serviceStatus, sizeof(SERVICE_STATUS_PROCESS), &bytesNeeded)) {
-                if (serviceStatus.dwCurrentState == SERVICE_RUNNING) {
-                    LogMessage(L"Stopping " + serviceName + L"...", false);
-                    if (ControlService(serviceHandle, SERVICE_CONTROL_STOP, (LPSERVICE_STATUS)&serviceStatus)) {
-                        Sleep(1000);
-                        while (QueryServiceStatusEx(serviceHandle, SC_STATUS_PROCESS_INFO, (LPBYTE)&serviceStatus, sizeof(SERVICE_STATUS_PROCESS), &bytesNeeded) && serviceStatus.dwCurrentState != SERVICE_STOPPED) {
-                            Sleep(1000);
-                        }
-                        LogMessage(serviceName + L" stopped.", false);
-                    }
-                    else {
-                        LogMessage(L"Error stopping service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
-                    }
-                }
-            }
-            else {
-                LogMessage(L"Error querying service status for " + serviceName + L": " + std::to_wstring(GetLastError()), true);
-            }
+    if (!scmHandle) {
+        LogMessage(L"Error opening Service Control Manager: " + std::to_wstring(GetLastError()), true);
+        return;
+    }
 
-            if (ChangeServiceConfig(serviceHandle, SERVICE_NO_CHANGE, SERVICE_DISABLED, SERVICE_NO_CHANGE, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
-                LogMessage(L"Disabled service " + serviceName, false);
+    SC_HANDLE serviceHandle = OpenService(scmHandle, serviceName.c_str(), SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG);
+    if (!serviceHandle) {
+        LogMessage(L"Error opening service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
+        CloseServiceHandle(scmHandle);
+        return;
+    }
+
+    SERVICE_STATUS_PROCESS serviceStatus;
+    DWORD bytesNeeded;
+    if (QueryServiceStatusEx(serviceHandle, SC_STATUS_PROCESS_INFO, (LPBYTE)&serviceStatus, sizeof(SERVICE_STATUS_PROCESS), &bytesNeeded)) {
+        if (serviceStatus.dwCurrentState == SERVICE_RUNNING) {
+            LogMessage(L"Stopping " + serviceName + L"...", false);
+            if (ControlService(serviceHandle, SERVICE_CONTROL_STOP, (LPSERVICE_STATUS)&serviceStatus)) {
+                Sleep(1000);
+                while (QueryServiceStatusEx(serviceHandle, SC_STATUS_PROCESS_INFO, (LPBYTE)&serviceStatus, sizeof(SERVICE_STATUS_PROCESS), &bytesNeeded) && serviceStatus.dwCurrentState != SERVICE_STOPPED) {
+                    Sleep(1000);
+                }
+                LogMessage(serviceName + L" stopped.", false);
             }
             else {
-                LogMessage(L"Error disabling service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
+                LogMessage(L"Error stopping service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
             }
-            CloseServiceHandle(serviceHandle);
         }
-        else {
-            LogMessage(L"Error opening service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
-        }
-        CloseServiceHandle(scmHandle);
     }
     else {
-        LogMessage(L"Error opening Service Control Manager: " + std::to_wstring(GetLastError()), true);
+        LogMessage(L"Error querying service status for " + serviceName + L": " + std::to_wstring(GetLastError()), true);
     }
+
+    if (ChangeServiceConfig(serviceHandle, SERVICE_NO_CHANGE, SERVICE_DISABLED, SERVICE_NO_CHANGE, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
+        LogMessage(L"Disabled service " + serviceName, false);
+    }
+    else {
+        LogMessage(L"Error disabling service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
+    }
+
+    SERVICE_FAILURE_ACTIONS sfa;
+    SC_ACTION actions[3];
+
+    actions[0].Type = SC_ACTION_NONE;
+    actions[0].Delay = 0;
+    actions[1].Type = SC_ACTION_NONE;
+    actions[1].Delay = 0;
+    actions[2].Type = SC_ACTION_NONE;
+    actions[2].Delay = 0;
+
+    sfa.dwResetPeriod = INFINITE;
+    sfa.lpRebootMsg = NULL;
+    sfa.lpCommand = NULL;
+    sfa.cActions = 3;
+    sfa.lpsaActions = actions;
+
+    if (!ChangeServiceConfig2(serviceHandle, SERVICE_CONFIG_FAILURE_ACTIONS, &sfa)) {
+        LogMessage(L"Error setting failure actions for " + serviceName + L": " + std::to_wstring(GetLastError()), true);
+    }
+
+    CloseServiceHandle(serviceHandle);
+    CloseServiceHandle(scmHandle);
 }
 
 void DisableWindowsDefender() {
-    LogHeader(L"Disabling Windows Defender");
+    LogHeader(L"Disabling Windows Defender and Related Services");
+
+    StopAndDisableService(L"WdNisSvc");
+    StopAndDisableService(L"WinDefend");
+    StopAndDisableService(L"SecurityHealthService");
+    StopAndDisableService(L"Sense");
+    StopAndDisableService(L"WdNisDrv");
+    StopAndDisableService(L"WDSS");
+
     SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", L"DisableRealtimeMonitoring", 1);
     SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender", L"DisableAntiSpyware", 1);
     SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Scan", L"DisableScanOnRealtimeEnable", 1);
@@ -150,12 +179,13 @@ void DisableWindowsDefender() {
 
 void DisableWindowsUpdate() {
     LogHeader(L"Disabling Windows Update and Related Services");
+
     StopAndDisableService(L"wuauserv");
     StopAndDisableService(L"bits");
     StopAndDisableService(L"dosvc");
 
     SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", L"NoAutoUpdate", 1);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", L"DisableOSUpgrade", 1);
+    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", L"DisableWindowsUpdateAccess", 1);
 }
 
 void CreateScheduledTask() {
@@ -212,7 +242,7 @@ void CreateScheduledTask() {
         return;
     }
 
-    hr = pRegInfo->put_Author(_bstr_t(L"YourName"));
+    hr = pRegInfo->put_Author(_bstr_t(L"Disable Windows Defender and Windows Update"));
     pRegInfo->Release();
     if (FAILED(hr)) {
         LogMessage(L"Failed to set task author: " + std::to_wstring(hr), true);
@@ -349,6 +379,32 @@ void CreateScheduledTask() {
     if (pRootFolder) pRootFolder->Release();
     CoUninitialize();
 }
+void RestartComputer() {
+    HANDLE hToken;
+    TOKEN_PRIVILEGES tkp;
+
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
+        LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid);
+        tkp.PrivilegeCount = 1;
+        tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+        if (AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0)) {
+            if (ExitWindowsEx(EWX_REBOOT | EWX_FORCE, SHTDN_REASON_MAJOR_OPERATINGSYSTEM | SHTDN_REASON_FLAG_PLANNED)) {
+                LogMessage(L"Restarting computer...", false);
+            }
+            else {
+                LogMessage(L"Failed to initiate computer restart: " + std::to_wstring(GetLastError()), true);
+            }
+        }
+        else {
+            LogMessage(L"Failed to adjust token privileges: " + std::to_wstring(GetLastError()), true);
+        }
+        CloseHandle(hToken);
+    }
+    else {
+        LogMessage(L"Failed to open process token: " + std::to_wstring(GetLastError()), true);
+    }
+}
 
 bool IsRunningAsAdmin() {
     BOOL isAdmin = FALSE;
@@ -430,7 +486,26 @@ int main() {
     try {
         DisableWindowsDefender();
         DisableWindowsUpdate();
+        LogMessage(L"Creating scheduled tasks...");
         CreateScheduledTask();
+
+        LogHeader(L"Completed, please choose restart preference");
+        int restartMsgBoxID = MessageBoxW(
+            NULL,
+            L"Your computer needs to restart to apply changes. Do you want to restart now?",
+            L"Restart Required",
+            MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2
+        );
+
+        if (restartMsgBoxID == IDYES) {
+            LogMessage(L"Restarting computer...");
+            RestartComputer();
+        }
+        else {
+            LogMessage(L"User chose to restart later.");
+            logFile.close();
+            return 0;
+        }
     }
     catch (const std::exception& e) {
         LogMessage(L"Standard exception caught: " + std::wstring(e.what(), e.what() + strlen(e.what())), true);
@@ -442,14 +517,10 @@ int main() {
     }
 
     if (hit_catch) {
-        LogMessage(L"Press Enter to exit.", true);
-    }
-    else {
-        LogHeader(L"Completed successfully, press Enter to exit.");
+        LogMessage(L"Failed, press Enter to exit.", true);
     }
 
     std::cin.ignore();
-
     logFile.close();
     return 0;
 }
