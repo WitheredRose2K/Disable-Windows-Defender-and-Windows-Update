@@ -4,22 +4,20 @@
 #include <comdef.h>
 #include <taskschd.h>
 #include <string>
-#include <locale>
-#include <sstream>
 
 #pragma comment(lib, "taskschd.lib")
 #pragma comment(lib, "comsupp.lib")
 
-std::ofstream logFile;
+std::ofstream log_file;
 
-std::string WStringToString(const std::wstring& wstr) {
+std::string wstring_to_string(const std::wstring& wstr) {
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), NULL, 0, NULL, NULL);
     std::string str(size_needed, 0);
     WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), &str[0], size_needed, NULL, NULL);
     return str;
 }
 
-std::wstring GetExecutablePath() {
+std::wstring get_executable_path() {
     wchar_t path[MAX_PATH];
     if (GetModuleFileName(NULL, path, MAX_PATH)) {
         return std::wstring(path);
@@ -27,113 +25,111 @@ std::wstring GetExecutablePath() {
     return L"";
 }
 
-void SetConsoleColor(WORD color) {
-    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-    SetConsoleTextAttribute(hConsole, color);
+void set_console_color(WORD color) {
+    HANDLE h_console = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(h_console, color);
 }
 
-void ResetConsoleColor() {
-    SetConsoleColor(FOREGROUND_INTENSITY);
+void reset_console_color() {
+    set_console_color(FOREGROUND_INTENSITY);
 }
 
-void LogHeader(const std::wstring& header) {
+void log_header(const std::wstring& header) {
     const std::wstring border = L"===================================================";
 
-    SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    set_console_color(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
 
-    size_t borderLength = border.size();
-    size_t headerLength = header.size();
-    size_t paddingLength = borderLength - headerLength - 4;
+    size_t border_length = border.size();
+    size_t header_length = header.size();
+    size_t padding_length = border_length - header_length - 4;
 
-    if (paddingLength < 0) paddingLength = 0;
+    if (padding_length < 0) padding_length = 0;
 
-    size_t leftPadding = paddingLength / 2;
-    size_t rightPadding = paddingLength - leftPadding;
-
-    std::wcout << border << std::endl;
-
-    std::wcout << L"==" << std::wstring(leftPadding, L' ') << header << std::wstring(rightPadding, L' ') << L"==" << std::endl;
+    size_t left_padding = padding_length / 2;
+    size_t right_padding = padding_length - left_padding;
 
     std::wcout << border << std::endl;
+    std::wcout << L"==" << std::wstring(left_padding, L' ') << header << std::wstring(right_padding, L' ') << L"==" << std::endl;
+    std::wcout << border << std::endl;
 
-    ResetConsoleColor();
+    reset_console_color();
 }
 
-void LogMessage(const std::wstring& message, bool error = false) {
-    SetConsoleColor(error ? FOREGROUND_RED : FOREGROUND_INTENSITY);
+void log_message(const std::wstring& message, bool error = false) {
+    set_console_color(error ? FOREGROUND_RED : FOREGROUND_INTENSITY);
     std::wcout << message << std::endl;
-    ResetConsoleColor();
+    reset_console_color();
 
-    std::wofstream logFile(GetExecutablePath().substr(0, GetExecutablePath().find_last_of(L"\\") + 1) + L"program_log.txt", std::ios::app);
-    if (logFile.is_open()) {
-        logFile << message << std::endl;
-        logFile.close();
+    std::wofstream log_file(get_executable_path().substr(0, get_executable_path().find_last_of(L"\\") + 1) + L"program_log.txt", std::ios::app);
+    if (log_file.is_open()) {
+        log_file << message << std::endl;
+        log_file.close();
     }
     else {
-        SetConsoleColor(FOREGROUND_RED);
+        set_console_color(FOREGROUND_RED);
         std::wcerr << L"Log file is not open. Cannot write message: " << message << std::endl;
-        ResetConsoleColor();
+        reset_console_color();
     }
 }
 
-void SetRegistryValue(HKEY hKey, const std::wstring& subKey, const std::wstring& valueName, DWORD value) {
+void set_registry_value(HKEY h_key, const std::wstring& sub_key, const std::wstring& value_name, DWORD value) {
     HKEY key;
-    LONG result = RegCreateKeyEx(hKey, subKey.c_str(), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, NULL, &key, NULL);
+    LONG result = RegCreateKeyEx(h_key, sub_key.c_str(), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, NULL, &key, NULL);
     if (result == ERROR_SUCCESS) {
-        result = RegSetValueEx(key, valueName.c_str(), 0, REG_DWORD, (const BYTE*)&value, sizeof(value));
+        result = RegSetValueEx(key, value_name.c_str(), 0, REG_DWORD, (const BYTE*)&value, sizeof(value));
         if (result != ERROR_SUCCESS) {
-            LogMessage(L"Error setting registry value for " + subKey + L" - " + valueName + L": " + std::to_wstring(result), true);
+            log_message(L"Error setting registry value for " + sub_key + L" - " + value_name + L": " + std::to_wstring(result), true);
         }
         else {
-            LogMessage(L"Set registry value " + valueName + L" [" + subKey + L"]", false);
+            log_message(L"Set registry value " + value_name + L" [" + sub_key + L"]", false);
         }
         RegCloseKey(key);
     }
     else {
-        LogMessage(L"Error opening or creating registry key " + subKey + L": " + std::to_wstring(result), true);
+        log_message(L"Error opening or creating registry key " + sub_key + L": " + std::to_wstring(result), true);
     }
 }
 
-void StopAndDisableService(const std::wstring& serviceName) {
-    SC_HANDLE scmHandle = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
-    if (!scmHandle) {
-        LogMessage(L"Error opening Service Control Manager: " + std::to_wstring(GetLastError()), true);
+void stop_and_disable_service(const std::wstring& service_name) {
+    SC_HANDLE scm_handle = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+    if (!scm_handle) {
+        log_message(L"Error opening Service Control Manager: " + std::to_wstring(GetLastError()), true);
         return;
     }
 
-    SC_HANDLE serviceHandle = OpenService(scmHandle, serviceName.c_str(), SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG);
-    if (!serviceHandle) {
-        LogMessage(L"Error opening service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
-        CloseServiceHandle(scmHandle);
+    SC_HANDLE service_handle = OpenService(scm_handle, service_name.c_str(), SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG);
+    if (!service_handle) {
+        log_message(L"Error opening service " + service_name + L": " + std::to_wstring(GetLastError()), true);
+        CloseServiceHandle(scm_handle);
         return;
     }
 
-    SERVICE_STATUS_PROCESS serviceStatus;
-    DWORD bytesNeeded;
-    if (QueryServiceStatusEx(serviceHandle, SC_STATUS_PROCESS_INFO, (LPBYTE)&serviceStatus, sizeof(SERVICE_STATUS_PROCESS), &bytesNeeded)) {
-        if (serviceStatus.dwCurrentState == SERVICE_RUNNING) {
-            LogMessage(L"Stopping " + serviceName + L"...", false);
-            if (ControlService(serviceHandle, SERVICE_CONTROL_STOP, (LPSERVICE_STATUS)&serviceStatus)) {
+    SERVICE_STATUS_PROCESS service_status;
+    DWORD bytes_needed;
+    if (QueryServiceStatusEx(service_handle, SC_STATUS_PROCESS_INFO, (LPBYTE)&service_status, sizeof(SERVICE_STATUS_PROCESS), &bytes_needed)) {
+        if (service_status.dwCurrentState == SERVICE_RUNNING) {
+            log_message(L"Stopping " + service_name + L"...", false);
+            if (ControlService(service_handle, SERVICE_CONTROL_STOP, (LPSERVICE_STATUS)&service_status)) {
                 Sleep(1000);
-                while (QueryServiceStatusEx(serviceHandle, SC_STATUS_PROCESS_INFO, (LPBYTE)&serviceStatus, sizeof(SERVICE_STATUS_PROCESS), &bytesNeeded) && serviceStatus.dwCurrentState != SERVICE_STOPPED) {
+                while (QueryServiceStatusEx(service_handle, SC_STATUS_PROCESS_INFO, (LPBYTE)&service_status, sizeof(SERVICE_STATUS_PROCESS), &bytes_needed) && service_status.dwCurrentState != SERVICE_STOPPED) {
                     Sleep(1000);
                 }
-                LogMessage(serviceName + L" stopped.", false);
+                log_message(service_name + L" stopped.", false);
             }
             else {
-                LogMessage(L"Error stopping service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
+                log_message(L"Error stopping service " + service_name + L": " + std::to_wstring(GetLastError()), true);
             }
         }
     }
     else {
-        LogMessage(L"Error querying service status for " + serviceName + L": " + std::to_wstring(GetLastError()), true);
+        log_message(L"Error querying service status for " + service_name + L": " + std::to_wstring(GetLastError()), true);
     }
 
-    if (ChangeServiceConfig(serviceHandle, SERVICE_NO_CHANGE, SERVICE_DISABLED, SERVICE_NO_CHANGE, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
-        LogMessage(L"Disabled service " + serviceName, false);
+    if (ChangeServiceConfig(service_handle, SERVICE_NO_CHANGE, SERVICE_DISABLED, SERVICE_NO_CHANGE, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
+        log_message(L"Disabled service " + service_name, false);
     }
     else {
-        LogMessage(L"Error disabling service " + serviceName + L": " + std::to_wstring(GetLastError()), true);
+        log_message(L"Error disabling service " + service_name + L": " + std::to_wstring(GetLastError()), true);
     }
 
     SERVICE_FAILURE_ACTIONS sfa;
@@ -152,375 +148,186 @@ void StopAndDisableService(const std::wstring& serviceName) {
     sfa.cActions = 3;
     sfa.lpsaActions = actions;
 
-    if (!ChangeServiceConfig2(serviceHandle, SERVICE_CONFIG_FAILURE_ACTIONS, &sfa)) {
-        LogMessage(L"Error setting failure actions for " + serviceName + L": " + std::to_wstring(GetLastError()), true);
+    if (!ChangeServiceConfig2(service_handle, SERVICE_CONFIG_FAILURE_ACTIONS, &sfa)) {
+        log_message(L"Error setting failure actions for " + service_name + L": " + std::to_wstring(GetLastError()), true);
     }
 
-    CloseServiceHandle(serviceHandle);
-    CloseServiceHandle(scmHandle);
+    CloseServiceHandle(service_handle);
+    CloseServiceHandle(scm_handle);
 }
 
-void DisableWindowsDefender() {
-    LogHeader(L"Disabling Windows Defender and Related Services");
+void disable_windows_defender() {
+    log_header(L"Disabling Windows Defender and Related Services");
 
-    StopAndDisableService(L"WdNisSvc");
-    StopAndDisableService(L"WinDefend");
-    StopAndDisableService(L"SecurityHealthService");
-    StopAndDisableService(L"Sense");
-    StopAndDisableService(L"WdNisDrv");
-    StopAndDisableService(L"WDSS");
+    stop_and_disable_service(L"WdNisSvc");
+    stop_and_disable_service(L"WinDefend");
+    stop_and_disable_service(L"SecurityHealthService");
+    stop_and_disable_service(L"Sense");
+    stop_and_disable_service(L"WdNisDrv");
+    stop_and_disable_service(L"WDSS");
 
-    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", L"DisableRealtimeMonitoring", 1);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender", L"DisableAntiSpyware", 1);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Scan", L"DisableScanOnRealtimeEnable", 1);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\FeatureControl", L"DisableAntiExploit", 1);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\FeatureControl", L"DisableAntiMalware", 1);
+    set_registry_value(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", L"DisableRealtimeMonitoring", 1);
+    set_registry_value(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender", L"DisableAntiSpyware", 1);
+    set_registry_value(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Scan", L"DisableScanOnRealtimeEnable", 1);
+    set_registry_value(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\FeatureControl", L"DisableAntiExploit", 1);
+    set_registry_value(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows Defender\\FeatureControl", L"DisableAntiMalware", 1);
 }
 
-void DisableWindowsUpdate() {
-    LogHeader(L"Disabling Windows Update and Related Services");
+void disable_windows_update() {
+    log_header(L"Disabling Windows Update and Related Services");
 
-    StopAndDisableService(L"wuauserv");
-    StopAndDisableService(L"bits");
-    StopAndDisableService(L"dosvc");
+    stop_and_disable_service(L"wuauserv");
+    stop_and_disable_service(L"bits");
+    stop_and_disable_service(L"dosvc");
 
-    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", L"NoAutoUpdate", 1);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", L"DisableWindowsUpdateAccess", 1);
+    set_registry_value(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", L"NoAutoUpdate", 1);
+    set_registry_value(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", L"DisableWindowsUpdateAccess", 1);
 }
 
-void CreateScheduledTask() {
-    LogHeader(L"Creating Scheduled Task to Enforce Settings");
+void create_scheduled_task() {
+    log_header(L"Creating Scheduled Task to Enforce Settings");
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) {
-        LogMessage(L"CoInitializeEx failed: " + std::to_wstring(hr), true);
+        log_message(L"CoInitializeEx failed: " + std::to_wstring(hr), true);
         return;
     }
 
-    ITaskService* pService = NULL;
-    hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
+    ITaskService* p_service = NULL;
+    hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&p_service);
     if (FAILED(hr)) {
-        LogMessage(L"Failed to create an instance of ITaskService: " + std::to_wstring(hr), true);
+        log_message(L"CoCreateInstance failed: " + std::to_wstring(hr), true);
         CoUninitialize();
         return;
     }
 
-    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+    hr = p_service->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
     if (FAILED(hr)) {
-        LogMessage(L"Failed to connect to task scheduler: " + std::to_wstring(hr), true);
-        pService->Release();
+        log_message(L"ITaskService::Connect failed: " + std::to_wstring(hr), true);
+        p_service->Release();
         CoUninitialize();
         return;
     }
 
-    ITaskFolder* pRootFolder = NULL;
-    hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+    ITaskFolder* p_root_folder = NULL;
+    hr = p_service->GetFolder(_bstr_t(L"\\"), &p_root_folder);
     if (FAILED(hr)) {
-        LogMessage(L"Failed to get the root folder: " + std::to_wstring(hr), true);
-        pService->Release();
+        log_message(L"Cannot get Root Folder pointer: " + std::to_wstring(hr), true);
+        p_service->Release();
         CoUninitialize();
         return;
     }
 
-    ITaskDefinition* pTask = NULL;
-    hr = pService->NewTask(0, &pTask);
+    hr = p_root_folder->DeleteTask(_bstr_t(L"EnforceDisableDefenderAndUpdate"), 0);
+
+    ITaskDefinition* p_task = NULL;
+    hr = p_service->NewTask(0, &p_task);
+    p_service->Release();
     if (FAILED(hr)) {
-        LogMessage(L"Failed to create new task definition: " + std::to_wstring(hr), true);
-        pRootFolder->Release();
-        pService->Release();
+        log_message(L"Failed to create a task definition: " + std::to_wstring(hr), true);
+        p_root_folder->Release();
         CoUninitialize();
         return;
     }
 
-    IRegistrationInfo* pRegInfo = NULL;
-    hr = pTask->get_RegistrationInfo(&pRegInfo);
+    IRegistrationInfo* p_reg_info = NULL;
+    hr = p_task->get_RegistrationInfo(&p_reg_info);
+    if (SUCCEEDED(hr)) {
+        p_reg_info->put_Author(_bstr_t(L"Your Name"));
+        p_reg_info->Release();
+    }
+
+    ITriggerCollection* p_trigger_collection = NULL;
+    hr = p_task->get_Triggers(&p_trigger_collection);
     if (FAILED(hr)) {
-        LogMessage(L"Failed to get registration info: " + std::to_wstring(hr), true);
-        pTask->Release();
-        pRootFolder->Release();
-        pService->Release();
+        log_message(L"Cannot get trigger collection: " + std::to_wstring(hr), true);
+        p_task->Release();
+        p_root_folder->Release();
         CoUninitialize();
         return;
     }
 
-    hr = pRegInfo->put_Author(_bstr_t(L"Disable Windows Defender and Windows Update"));
-    pRegInfo->Release();
+    ITrigger* p_trigger = NULL;
+    hr = p_trigger_collection->Create(TASK_TRIGGER_LOGON, &p_trigger);
+    p_trigger_collection->Release();
     if (FAILED(hr)) {
-        LogMessage(L"Failed to set task author: " + std::to_wstring(hr), true);
-    }
-
-    ITaskSettings* pSettings = NULL;
-    hr = pTask->get_Settings(&pSettings);
-    if (FAILED(hr)) {
-        LogMessage(L"Cannot get settings pointer: " + std::to_wstring(hr));
-        pTask->Release();
-        pRootFolder->Release();
+        log_message(L"Cannot create trigger: " + std::to_wstring(hr), true);
+        p_task->Release();
+        p_root_folder->Release();
         CoUninitialize();
         return;
     }
 
-    hr = pSettings->put_StartWhenAvailable(VARIANT_TRUE);
-    pSettings->Release();
+    ILogonTrigger* p_logon_trigger = NULL;
+    hr = p_trigger->QueryInterface(IID_ILogonTrigger, (void**)&p_logon_trigger);
+    p_trigger->Release();
     if (FAILED(hr)) {
-        LogMessage(L"Cannot put settings: " + std::to_wstring(hr));
-        pTask->Release();
-        pRootFolder->Release();
+        log_message(L"QueryInterface call failed for ILogonTrigger: " + std::to_wstring(hr), true);
+        p_task->Release();
+        p_root_folder->Release();
         CoUninitialize();
         return;
     }
 
-    ITriggerCollection* pTriggerCollection = NULL;
-    hr = pTask->get_Triggers(&pTriggerCollection);
+    p_logon_trigger->put_Id(_bstr_t(L"Trigger1"));
+    p_logon_trigger->put_UserId(_bstr_t(L"S-1-5-18"));
+    p_logon_trigger->Release();
+
+    IActionCollection* p_action_collection = NULL;
+    hr = p_task->get_Actions(&p_action_collection);
     if (FAILED(hr)) {
-        LogMessage(L"Cannot get trigger collection: " + std::to_wstring(hr));
-        pTask->Release();
-        pRootFolder->Release();
+        log_message(L"Cannot get Task collection: " + std::to_wstring(hr), true);
+        p_task->Release();
+        p_root_folder->Release();
         CoUninitialize();
         return;
     }
 
-    ITrigger* pTrigger = NULL;
-    hr = pTriggerCollection->Create(TASK_TRIGGER_DAILY, &pTrigger);
-    pTriggerCollection->Release();
+    IAction* p_action = NULL;
+    hr = p_action_collection->Create(TASK_ACTION_EXEC, &p_action);
+    p_action_collection->Release();
     if (FAILED(hr)) {
-        LogMessage(L"Cannot create trigger: " + std::to_wstring(hr));
-        pTask->Release();
-        pRootFolder->Release();
+        log_message(L"Cannot create the action: " + std::to_wstring(hr), true);
+        p_task->Release();
+        p_root_folder->Release();
         CoUninitialize();
         return;
     }
 
-    IDailyTrigger* pDailyTrigger = NULL;
-    hr = pTrigger->QueryInterface(IID_IDailyTrigger, (void**)&pDailyTrigger);
-    pTrigger->Release();
+    IExecAction* p_exec_action = NULL;
+    hr = p_action->QueryInterface(IID_IExecAction, (void**)&p_exec_action);
+    p_action->Release();
     if (FAILED(hr)) {
-        LogMessage(L"Cannot query for daily trigger: " + std::to_wstring(hr));
-        pTask->Release();
-        pRootFolder->Release();
+        log_message(L"QueryInterface call failed for IExecAction: " + std::to_wstring(hr), true);
+        p_task->Release();
+        p_root_folder->Release();
         CoUninitialize();
         return;
     }
 
-    hr = pDailyTrigger->put_DaysInterval(1);
-    pDailyTrigger->Release();
+    p_exec_action->put_Path(_bstr_t(get_executable_path().c_str()));
+    p_exec_action->Release();
+
+    IRegisteredTask* p_registered_task = NULL;
+    hr = p_root_folder->RegisterTaskDefinition(_bstr_t(L"EnforceDisableDefenderAndUpdate"), p_task, TASK_CREATE_OR_UPDATE, _variant_t(L"S-1-5-18"), _variant_t(), TASK_LOGON_SERVICE_ACCOUNT, _variant_t(L""), &p_registered_task);
     if (FAILED(hr)) {
-        LogMessage(L"Cannot set daily trigger interval: " + std::to_wstring(hr));
-        pTask->Release();
-        pRootFolder->Release();
-        CoUninitialize();
-        return;
-    }
-
-    IActionCollection* pActionCollection = NULL;
-    hr = pTask->get_Actions(&pActionCollection);
-    if (FAILED(hr)) {
-        LogMessage(L"Cannot get action collection pointer: " + std::to_wstring(hr));
-        pTask->Release();
-        pRootFolder->Release();
-        CoUninitialize();
-        return;
-    }
-
-    IAction* pAction = NULL;
-    hr = pActionCollection->Create(TASK_ACTION_EXEC, &pAction);
-    pActionCollection->Release();
-    if (FAILED(hr)) {
-        LogMessage(L"Cannot create action: " + std::to_wstring(hr), true);
-        pTask->Release();
-        pRootFolder->Release();
-        CoUninitialize();
-        return;
-    }
-
-    IExecAction* pExecAction = NULL;
-    hr = pAction->QueryInterface(IID_IExecAction, (void**)&pExecAction);
-    pAction->Release();
-    if (FAILED(hr)) {
-        LogMessage(L"QueryInterface call failed for IExecAction: " + std::to_wstring(hr), true);
-        pTask->Release();
-        pRootFolder->Release();
-        CoUninitialize();
-        return;
-    }
-
-    std::wstring exePath = GetExecutablePath();
-
-    hr = pExecAction->put_Path(_bstr_t(exePath.c_str()));
-    if (FAILED(hr)) {
-        LogMessage(L"Cannot put executable path: " + std::to_wstring(hr)), true;
-        pExecAction->Release();
-        pTask->Release();
-        pRootFolder->Release();
-        pService->Release();
-        CoUninitialize();
-        return;
-    }
-
-    IRegisteredTask* pRegisteredTask = NULL;
-    hr = pRootFolder->RegisterTaskDefinition(
-        _bstr_t(L"DisableDefenderAndUpdate"),
-        pTask,
-        TASK_CREATE_OR_UPDATE,
-        _variant_t(L"SYSTEM"),
-        _variant_t(),
-        TASK_LOGON_SERVICE_ACCOUNT,
-        _variant_t(L""),
-        &pRegisteredTask
-    );
-
-    if (FAILED(hr)) {
-        LogMessage(L"Failed to register scheduled task: " + std::to_wstring(hr), true);
+        log_message(L"Error saving the Task : " + std::to_wstring(hr), true);
     }
     else {
-        LogMessage(L"Scheduled task created successfully.", false);
+        log_message(L"Success! Task successfully registered.", false);
     }
 
-    if (pRegisteredTask) pRegisteredTask->Release();
-    if (pTask) pTask->Release();
-    if (pRootFolder) pRootFolder->Release();
+    p_registered_task->Release();
+    p_root_folder->Release();
+    p_task->Release();
     CoUninitialize();
-}
-void RestartComputer() {
-    HANDLE hToken;
-    TOKEN_PRIVILEGES tkp;
-
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
-        LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid);
-        tkp.PrivilegeCount = 1;
-        tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-
-        if (AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0)) {
-            if (ExitWindowsEx(EWX_REBOOT | EWX_FORCE, SHTDN_REASON_MAJOR_OPERATINGSYSTEM | SHTDN_REASON_FLAG_PLANNED)) {
-                LogMessage(L"Restarting computer...", false);
-            }
-            else {
-                LogMessage(L"Failed to initiate computer restart: " + std::to_wstring(GetLastError()), true);
-            }
-        }
-        else {
-            LogMessage(L"Failed to adjust token privileges: " + std::to_wstring(GetLastError()), true);
-        }
-        CloseHandle(hToken);
-    }
-    else {
-        LogMessage(L"Failed to open process token: " + std::to_wstring(GetLastError()), true);
-    }
-}
-
-bool IsRunningAsAdmin() {
-    BOOL isAdmin = FALSE;
-    PSID administratorsGroup = NULL;
-
-    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
-    if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
-        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &administratorsGroup)) {
-
-        if (!CheckTokenMembership(NULL, administratorsGroup, &isAdmin)) {
-            isAdmin = FALSE;
-        }
-
-        FreeSid(administratorsGroup);
-    }
-
-    return isAdmin == TRUE;
-}
-
-void RestartAsAdmin(const std::wstring& executablePath) {
-    SHELLEXECUTEINFOW sei = { sizeof(sei) };
-    sei.lpVerb = L"runas";
-    sei.lpFile = executablePath.c_str();
-    sei.nShow = SW_SHOWNORMAL;
-
-    if (!ShellExecuteExW(&sei)) {
-        MessageBoxW(NULL, L"Failed to restart the program with administrative privileges.", L"Restart Failed", MB_ICONERROR | MB_OK);
-        ExitProcess(0);
-    }
-
-    ExitProcess(0);
 }
 
 int main() {
-    if (!IsRunningAsAdmin()) {
-        std::wstring executablePath = GetExecutablePath();
-
-        int msgBoxResult = MessageBoxW(
-            NULL,
-            L"This program requires administrative privileges to run correctly. Would you like to restart it with administrative privileges?",
-            L"Administrative Privileges Required",
-            MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2
-        );
-
-        if (msgBoxResult == IDYES) {
-            if (!executablePath.empty()) {
-                RestartAsAdmin(executablePath);
-            }
-            else {
-                MessageBoxW(
-                    NULL,
-                    L"Unable to determine the executable path. Please restart the program manually as an administrator.",
-                    L"Path Error",
-                    MB_ICONERROR | MB_OK
-                );
-                return 1;
-            }
-        }
-        else {
-            MessageBoxW(
-                NULL,
-                L"The program cannot continue without administrative privileges. Please restart it as an administrator.",
-                L"Action Required",
-                MB_ICONERROR | MB_OK
-            );
-        }
-
-        return 1;
-    }
-
-    logFile.open(GetExecutablePath().substr(0, GetExecutablePath().find_last_of(L"\\") + 1) + L"program_log.txt", std::ios::out | std::ios::trunc);
-    if (!logFile.is_open()) {
-        LogMessage(L"Failed to open log file. Check permissions and path.", true);
-        return 1;
-    }
-
-    bool hit_catch = false;
-
-    try {
-        DisableWindowsDefender();
-        DisableWindowsUpdate();
-        LogMessage(L"Creating scheduled tasks...");
-        CreateScheduledTask();
-
-        LogHeader(L"Completed, please choose restart preference");
-        int restartMsgBoxID = MessageBoxW(
-            NULL,
-            L"Your computer needs to restart to apply changes. Do you want to restart now?",
-            L"Restart Required",
-            MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2
-        );
-
-        if (restartMsgBoxID == IDYES) {
-            LogMessage(L"Restarting computer...");
-            RestartComputer();
-        }
-        else {
-            LogMessage(L"User chose to restart later.");
-            logFile.close();
-            return 0;
-        }
-    }
-    catch (const std::exception& e) {
-        LogMessage(L"Standard exception caught: " + std::wstring(e.what(), e.what() + strlen(e.what())), true);
-        hit_catch = true;
-    }
-    catch (...) {
-        LogMessage(L"Unknown exception caught.", true);
-        hit_catch = true;
-    }
-
-    if (hit_catch) {
-        LogMessage(L"Failed, press Enter to exit.", true);
-    }
-
-    std::cin.ignore();
-    logFile.close();
+    log_file.open(get_executable_path().substr(0, get_executable_path().find_last_of(L"\\") + 1) + L"program_log.txt", std::ios::app);
+    disable_windows_defender();
+    disable_windows_update();
+    create_scheduled_task();
+    log_message(L"Windows Defender and Windows Updates should be disabled. Please restart your computer to apply changes.", false);
+    log_file.close();
     return 0;
 }
